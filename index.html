@@ -13,6 +13,10 @@ body{background:#f3f5f7;color:#263238;font-family:Inter,ui-sans-serif,system-ui,
 ::-webkit-scrollbar{width:6px;height:6px}::-webkit-scrollbar-track{background:#f1f1f1}::-webkit-scrollbar-thumb{background:#90a4ae;border-radius:3px}
 .option-eliminated .option-text-content{text-decoration:line-through;opacity:.4}.option-eliminated .option-letter-box{opacity:.35}
 .modal{position:fixed;inset:0;background:rgba(15,23,42,.48);display:none;align-items:center;justify-content:center;padding:16px;z-index:50;backdrop-filter:blur(2px)}.modal.open{display:flex}
+.drop-on{border-color:#009688!important;background:#e0f2f1}
+.rich-img{display:block;max-width:100%;height:auto;margin:.75rem 0;border:1px solid #e5e7eb;border-radius:6px;background:#fff}
+.img-warn{display:block;margin:.5rem 0;padding:.5rem .75rem;border:1px solid #fcd34d;background:#fffbeb;color:#78350f;border-radius:6px;font-size:13px}
+.copyable{user-select:text;-webkit-user-select:text}
 </style>
 </head>
 <body class="min-h-screen flex flex-col selection:bg-[#009688] selection:text-white">
@@ -76,9 +80,9 @@ body{background:#f3f5f7;color:#263238;font-family:Inter,ui-sans-serif,system-ui,
       <button id="closeImport" class="p-1.5 rounded hover:bg-slate-100 text-slate-500" title="Fechar"><i data-lucide="x" class="w-5 h-5"></i></button>
     </div>
     <div class="p-5 sm:p-6">
-      <label class="block border-2 border-dashed border-slate-300 hover:border-[#009688] rounded-[8px] p-8 text-center cursor-pointer transition">
+      <label id="dropZone" class="block border-2 border-dashed border-slate-300 hover:border-[#009688] rounded-[8px] p-8 text-center cursor-pointer transition">
         <i data-lucide="file-up" class="w-8 h-8 mx-auto mb-3 text-[#009688]"></i>
-        <div class="font-semibold text-slate-700">Selecione o PDF</div>
+        <div class="font-semibold text-slate-700">Arraste o PDF para cá ou clique para selecionar</div>
         <div class="text-xs text-slate-500 mt-1">O arquivo será processado para montar as questões.</div>
         <input type="file" id="pdfInput" accept="application/pdf" class="hidden">
       </label>
@@ -134,15 +138,18 @@ const STORAGE='questoes_minimal_v1';
 function cleanQuestion(q,i){
   return {
     id:q.id||i+1, numero:q.numero||i+1, codigo:q.codigo||'', instituicao:q.instituicao||'',
-    ano:q.ano||'', enunciado:q.enunciado||'', alternativas:(q.alternativas||[]).map(a=>({letra:a.letra,texto:a.texto})),
-    correta:q.correta||'', videoUrl:q.videoUrl||'', selected:null, answered:false, eliminated:[]
+    ano:q.ano||'', enunciado:q.enunciado||'',
+    alternativas:(q.alternativas||[]).map(a=>({letra:a.letra,texto:a.texto,explicacao:a.explicacao||''})),
+    correta:q.correta||'', comentario:q.comentario||'', videoUrl:q.videoUrl||'', allLinks:q.allLinks||[], avisos:q.avisos||[],
+    selected:q.selected||null, answered:!!q.answered, eliminated:q.eliminated||[]
   };
 }
-function save(){localStorage.setItem(STORAGE,JSON.stringify(state))}
+function save(){try{localStorage.setItem(STORAGE,JSON.stringify(state))}catch(e){console.warn('Não foi possível salvar o progresso',e)}}
 function load(){
   try{const x=JSON.parse(localStorage.getItem(STORAGE));if(x?.questions?.length){state.questions=x.questions.map(cleanQuestion);state.current=Math.min(x.current||0,state.questions.length-1)}}catch{}
 }
 function esc(s){return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
+function rich(s){return esc(s).replace(/⟦IMG:([^⟧]+)⟧/g,(_,id)=>IMGS[id]?`<img class="rich-img" src="${IMGS[id]}" alt="Imagem da questão">`:`<span class="img-warn">⚠ Imagem não pôde ser importada do PDF — confira no arquivo original.</span>`)}
 function render(){
   const q=state.questions[state.current];
   document.getElementById('total').textContent=state.questions.length;
@@ -161,17 +168,20 @@ function render(){
     else if(right) box=`<div class="option-letter-box w-[44px] h-[44px] rounded-[6px] border-2 border-[#10b981] p-[2px] flex items-center justify-center shrink-0"><div class="w-full h-full rounded-[3px] bg-[#10b981] text-white font-bold text-[15px] flex items-center justify-center">${a.letra}</div></div>`;
     else if(selected&&hasKey) box=`<div class="option-letter-box w-[44px] h-[44px] rounded-[6px] border-2 border-rose-500 p-[2px] flex items-center justify-center shrink-0"><div class="w-full h-full rounded-[3px] bg-rose-500 text-white font-bold text-[15px] flex items-center justify-center">${a.letra}</div></div>`;
     else box=`<div class="option-letter-box w-[42px] h-[42px] rounded-[5px] bg-white border-[1.5px] border-[#8e99a4] text-[#1f2937] font-bold text-[15px] flex items-center justify-center shrink-0">${a.letra}</div>`;
-    return `<div onclick="selectOption('${a.letra}')" oncontextmenu="event.preventDefault();eliminate('${a.letra}')" class="group flex items-center gap-4 py-1.5 cursor-pointer select-none ${eliminated&&!q.answered?'option-eliminated':''}">${box}<div class="flex-1 min-w-0"><div class="option-text-content text-[15px] sm:text-[16px] text-[#263238]">${esc(a.texto)}</div></div><button type="button" onclick="event.stopPropagation();eliminate('${a.letra}')" class="opacity-0 group-hover:opacity-100 p-1.5 rounded text-slate-400 hover:text-rose-600 transition shrink-0" title="Riscar alternativa (ou clique com o botão direito)"><i data-lucide="scissors" class="w-4 h-4"></i></button></div>`;
+    return `<div onclick="optClick(event,'${a.letra}')" oncontextmenu="optCtx(event,'${a.letra}')" class="group flex items-center gap-4 py-1.5 cursor-pointer ${eliminated&&!q.answered?'option-eliminated':''}">${box}<div class="flex-1 min-w-0"><div class="option-text-content text-[15px] sm:text-[16px] text-[#263238]">${rich(a.texto)}</div>${q.answered&&a.explicacao?`<div class="copyable mt-2 text-[14px] leading-6 text-slate-600 bg-slate-50 border-l-2 ${right?'border-[#10b981]':'border-slate-300'} pl-3 py-1.5 whitespace-pre-line cursor-text" onclick="event.stopPropagation()">${rich(a.explicacao)}</div>`:''}</div><button type="button" onclick="event.stopPropagation();eliminate('${a.letra}')" class="opacity-0 group-hover:opacity-100 p-1.5 rounded text-slate-400 hover:text-rose-600 transition shrink-0" title="Riscar alternativa (ou clique com o botão direito)"><i data-lucide="scissors" class="w-4 h-4"></i></button></div>`;
   }).join('');
   const video=q.videoUrl?`<a class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[5px] bg-[#e0f2f1] hover:bg-[#b2dfdb] text-[#00796b] text-xs font-semibold transition" href="${esc(q.videoUrl)}" target="_blank" rel="noopener" title="Esta questão possui resolução em vídeo"><i data-lucide="play-circle" class="w-4 h-4"></i>Vídeo</a>`:'';
+  const avisos=(q.avisos||[]).map(t=>`<div class="flex gap-2 text-[13px] bg-amber-50 border border-amber-300 text-amber-900 rounded-[5px] px-3 py-2"><i data-lucide="alert-triangle" class="w-4 h-4 shrink-0 mt-0.5"></i><span>${esc(t)}</span></div>`).join('');
+  const extra=(q.allLinks||[]).filter(u=>u!==q.videoUrl), hasExpl=(q.alternativas||[]).some(a=>a.explicacao);
+  const resol=!q.answered?'':(q.comentario||extra.length)?`<div class="border-t border-[#eef0f3] pt-5"><h3 class="font-bold text-[#00897b] mb-2">Resolução comentada</h3>${q.comentario?`<div class="copyable text-[15px] leading-7 text-[#37474f] whitespace-pre-line">${rich(q.comentario)}</div>`:''}${extra.map(u=>`<a class="block text-sm text-[#00796b] underline mt-2 break-all" href="${esc(u)}" target="_blank" rel="noopener">${esc(u)}</a>`).join('')}</div>`:hasExpl?'':'<div class="text-xs text-slate-400 pt-2">Esta questão não possui resolução comentada no PDF.</div>';
   document.getElementById('app').innerHTML=`<article class="bg-white rounded-[6px] border border-[#e5e7eb] shadow-[0_1px_3px_rgba(0,0,0,0.03)] overflow-hidden">
     <div class="px-6 sm:px-10 py-5 border-b border-[#eef0f3] flex flex-wrap items-center justify-between gap-3">
       <div class="flex flex-wrap items-center gap-3 min-w-0"><h2 class="text-[18px] font-bold text-[#00897b] whitespace-nowrap">Questão ${q.numero}</h2>${q.instituicao?`<span class="px-3.5 py-1 rounded-full bg-[#eceff1] text-[#78909c] text-[11.5px] font-medium uppercase tracking-wide truncate max-w-[260px] sm:max-w-[460px]" title="${esc(q.instituicao)}">${esc(q.instituicao)}</span>`:''}${q.ano?`<span class="px-3 py-1 rounded-full bg-[#eceff1] text-[#78909c] text-[11.5px] font-medium">${esc(String(q.ano))}</span>`:''}</div>
-      <div class="flex items-center gap-3 text-[#00897b]">${video}</div>
+      <div class="flex items-center gap-3 text-[#00897b]"><button type="button" onclick="copyPrompt()" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[5px] bg-[#eceff1] hover:bg-slate-200 text-slate-600 text-xs font-semibold transition" title="Copiar a questão como prompt para a IA"><i data-lucide="copy" class="w-4 h-4"></i>Copiar</button>${video}</div>
     </div>
-    <div class="px-6 sm:px-10 py-7 space-y-6">
-      <div class="space-y-2"><div class="flex flex-wrap items-center gap-2">${q.codigo?`<span class="text-[12px] text-[#9e9e9e] tracking-wide">${esc(q.codigo)}</span>`:''}${status}</div><div class="text-[16px] sm:text-[17px] leading-7 text-[#263238] whitespace-pre-line pt-1">${esc(q.enunciado)}</div></div>
-      <div class="space-y-3.5 pt-2">${opts}</div>
+    <div class="px-6 sm:px-10 py-7 space-y-6">${avisos?`<div class="space-y-2">${avisos}</div>`:''}
+      <div class="space-y-2"><div class="flex flex-wrap items-center gap-2">${q.codigo?`<span class="text-[12px] text-[#9e9e9e] tracking-wide">${esc(q.codigo)}</span>`:''}${status}</div><div class="text-[16px] sm:text-[17px] leading-7 text-[#263238] whitespace-pre-line pt-1">${rich(q.enunciado)}</div></div>
+      <div class="space-y-3.5 pt-2">${opts}</div>${resol}
     </div>
     <div class="px-6 sm:px-10 py-5 border-t border-[#eef0f3] flex flex-wrap items-center justify-between gap-4">
       <div class="flex items-center gap-3 w-full sm:w-auto"><button onclick="answer()" ${q.answered||!q.selected?'disabled':''} class="w-full sm:w-[260px] py-2.5 px-6 rounded-[5px] font-semibold text-[14px] transition ${q.answered?'bg-[#d4ece9] text-white cursor-default':q.selected?'bg-[#009688] hover:bg-[#00796b] text-white shadow-xs':'bg-[#009688] opacity-85 text-white cursor-not-allowed'}">${q.answered?'Respondida':'Responder'}</button>${q.answered?`<button onclick="retry()" class="inline-flex items-center gap-1.5 px-3 py-2.5 rounded-[5px] border border-slate-200 hover:border-slate-300 text-slate-500 hover:text-slate-700 text-xs font-medium transition" title="Limpar resposta e tentar novamente"><i data-lucide="rotate-ccw" class="w-3.5 h-3.5"></i>Refazer</button>`:''}</div>
@@ -180,6 +190,27 @@ function render(){
   </article>`;
   if(window.lucide)lucide.createIcons();
   if(!mapEl.classList.contains('translate-x-full')) renderMap();
+}
+let IMGS={};
+const idb=()=>new Promise((ok,no)=>{const r=indexedDB.open('banca',1);r.onupgradeneeded=()=>r.result.createObjectStore('kv');r.onsuccess=()=>ok(r.result);r.onerror=()=>no(r.error)});
+async function saveImgs(){try{(await idb()).transaction('kv','readwrite').objectStore('kv').put(IMGS,'imgs')}catch(e){console.warn(e)}}
+async function loadImgs(){try{const r=(await idb()).transaction('kv').objectStore('kv').get('imgs');r.onsuccess=()=>{IMGS=r.result||{};render()}}catch(e){console.warn(e)}}
+function hasSel(){return !!String(getSelection()).trim()}
+function optClick(e,l){if(hasSel())return;selectOption(l)}
+function optCtx(e,l){if(hasSel())return;e.preventDefault();eliminate(l)}
+function toast(m){let d=document.getElementById('toast');if(!d){d=document.createElement('div');d.id='toast';d.className='fixed bottom-6 left-1/2 -translate-x-1/2 z-[60] bg-slate-800 text-white text-sm px-4 py-2 rounded-full shadow-lg transition-opacity';document.body.appendChild(d)}d.textContent=m;d.style.opacity=1;clearTimeout(d._t);d._t=setTimeout(()=>d.style.opacity=0,1800)}
+async function copyText(t){try{await navigator.clipboard.writeText(t)}catch{const a=document.createElement('textarea');a.value=t;a.style.cssText='position:fixed;opacity:0';document.body.appendChild(a);a.select();document.execCommand('copy');a.remove()}toast('Prompt copiado!')}
+function copyPrompt(){
+  const q=state.questions[state.current]; if(!q)return;
+  const plain=s=>String(s||'').replace(/⟦IMG:[^⟧]+⟧/g,'[imagem omitida]').replace(/[ \t]+/g,' ').replace(/\n{3,}/g,'\n\n').trim();
+  const fmt=a=>`"${a.letra}) ${plain(a.texto).replace(/\s*\n\s*/g,' ')}"`;
+  const sel=q.alternativas.find(a=>a.letra===q.selected), cor=q.alternativas.find(a=>a.letra===q.correta);
+  const outras=q.alternativas.filter(a=>a!==sel&&a!==cor).map(a=>'- '+fmt(a)).join('\n');
+  let t=`Estou fazendo um teste com base neste material e me deparei com a seguinte pergunta: "${plain(q.enunciado)}"\n`;
+  if(sel&&cor&&sel!==cor) t+=`Escolhi a resposta: ${fmt(sel)}\nEssa resposta estava errada. A resposta correta é ${fmt(cor)}. As outras alternativas são:\n${outras}\nMe ajude a entender por que minha resposta estava errada.`;
+  else if(cor) t+=(sel?`Escolhi a resposta: ${fmt(sel)} e acertei, mas quero entender melhor. `:'')+`A resposta correta é ${fmt(cor)}. As outras alternativas são:\n${outras}\nMe ajude a entender por que ela está correta e por que as outras estão erradas.`;
+  else t+=`As alternativas são:\n${q.alternativas.map(a=>'- '+fmt(a)).join('\n')}\nMe ajude a entender qual é a correta e por quê.`;
+  copyText(t);
 }
 function selectOption(letter){
   const q=state.questions[state.current]; if(!q||q.answered)return;
@@ -202,9 +233,15 @@ document.getElementById('next').onclick=()=>move(1);
 function skipQuestion(){ if(state.current>=state.questions.length-1)return; state.current++; save(); render(); window.scrollTo({top:0,behavior:'smooth'}); }
 document.getElementById('importBtn').onclick=()=>document.getElementById('importModal').classList.add('open');
 document.getElementById('closeImport').onclick=()=>document.getElementById('importModal').classList.remove('open');
-document.getElementById('pdfInput').onchange=e=>{if(e.target.files[0])processPdf(e.target.files[0])};
+const dz=document.getElementById('dropZone');
+const isPdf=f=>f&&(f.type==='application/pdf'||/\.pdf$/i.test(f.name));
+function takeFile(f){document.getElementById('importModal').classList.add('open');if(!isPdf(f)){document.getElementById('progress').textContent='Arquivo inválido: envie um PDF.';return}processPdf(f)}
+document.getElementById('pdfInput').onchange=e=>{const f=e.target.files[0];e.target.value='';if(f)takeFile(f)};
+['dragenter','dragover'].forEach(ev=>window.addEventListener(ev,e=>{if(!e.dataTransfer||![...e.dataTransfer.types].includes('Files'))return;e.preventDefault();dz.classList.add('drop-on');document.getElementById('importModal').classList.add('open')}));
+window.addEventListener('dragleave',e=>{if(!e.relatedTarget)dz.classList.remove('drop-on')});
+window.addEventListener('drop',e=>{if(!e.dataTransfer?.files?.length)return;e.preventDefault();dz.classList.remove('drop-on');takeFile(e.dataTransfer.files[0])});
 document.addEventListener('keydown',e=>{
-  if(e.target.matches('input,textarea'))return;
+  if(e.target.matches('input,textarea')||e.ctrlKey||e.metaKey||e.altKey)return;
   if(e.key==='ArrowLeft')move(-1); if(e.key==='ArrowRight')move(1);
   if(['a','b','c','d','e'].includes(e.key.toLowerCase()))selectOption(e.key.toUpperCase());
   if(e.key==='Enter')answer();
@@ -226,7 +263,7 @@ const VIDEO_HOST_RE = /youtube\.com|youtu\.be|vimeo\.com|loom\.com|vdocipher|pan
         }
         if (!out || out.endsWith('\n')) { out += line; return; }
         const prevLine = out.slice(out.lastIndexOf('\n') + 1);
-        const isBullet = /^(?:[•●▪◦\-–—*]|\d+[\.\)]|[a-eA-E]\))\s*/.test(line);
+        const isBullet = /^(?:[•●▪◦\-–—*]|\d+[\.\)]|[a-eA-E]\))\s*/.test(line) || line.startsWith('⟦IMG:') || prevLine.startsWith('⟦IMG:');
         const prevEnds = /[.:!?]$/.test(prevLine) && prevLine.length < 50;
         out += (isBullet || prevEnds) ? '\n' + line : ' ' + line;
       });
@@ -263,7 +300,7 @@ const VIDEO_HOST_RE = /youtube\.com|youtu\.be|vimeo\.com|loom\.com|vdocipher|pan
             if (next > 'E') break;
           }
         }
-        if (!best || chain.length >= best.length) best = chain;
+        if (!best || chain.length >= Math.min(best.length, 4)) best = chain; // prefere a última cadeia A,B,C,D(,E): trechos como "A: ... B: ..." (ATLS) no enunciado não são alternativas
       });
       return best && best.length >= 2 ? best : null;
     }
@@ -422,7 +459,7 @@ const VIDEO_HOST_RE = /youtube\.com|youtu\.be|vimeo\.com|loom\.com|vdocipher|pan
         const out = [];
         let m;
         while ((m = re.exec(text)) !== null) {
-          out.push({ num: parseInt(m[1], 10), start: m.index, bodyStart: m.index + m[0].length });
+          out.push({ num: parseInt(m[1], 10), start: m.index, bodyStart: m.index + m[0].length, id: (m[0].match(/ID[ \t]*[:\-]?[ \t]*(\d{8,12})/i) || [])[1] || '' });
         }
         return out;
       };
@@ -562,13 +599,29 @@ const VIDEO_HOST_RE = /youtube\.com|youtu\.be|vimeo\.com|loom\.com|vdocipher|pan
       return { blocks, commentMap };
     }
 
+    function markerIds(s) { return [...String(s || '').matchAll(/⟦IMG:([^⟧]+)⟧/g)].map(m => m[1]); }
+    const FIG_RE = /(?:figura|imagem|ilustra[çc][ãa]o|esquema|fluxograma|tabela|gr[áa]fico|radiografia|tomografia|ECG|eletrocardiograma|foto(?:grafia)?)s?\s+(?:abaixo|a\s+seguir|ao\s+lado|acima)|conforme\s+(?:a\s+)?(?:figura|imagem|ilustra[çc][ãa]o|tabela)|(?:observe|veja)\s+(?:a|o|as|os)\s+(?:figura|imagem|ilustra[çc][ãa]o|tabela|fluxograma|esquema)|abaixo\s+est[áa]\s+(?:a|o|um|uma)\s+(?:figura|imagem|tabela|fluxograma|esquema)/i;
+    function buildAvisos(parsed, comment, correta) {
+      const av = [];
+      const stem = [parsed.enunciado, ...parsed.alternativas.map(a => a.texto)].join(' ');
+      const res = [comment.comentario, ...Object.values(comment.expl)].join(' ');
+      if (!correta) av.push('Gabarito não encontrado no PDF para esta questão.');
+      if (FIG_RE.test(stem) && !markerIds(stem).length) av.push('O enunciado/alternativas citam uma figura, imagem ou tabela que não foi encontrada no PDF (pode ser desenho vetorial). Confira no arquivo original.');
+      if (FIG_RE.test(res) && !markerIds(res).length) av.push('A resolução cita uma figura, imagem ou tabela que não foi encontrada no PDF. Confira no arquivo original.');
+      if (markerIds(stem + ' ' + res).some(id => !IMGS[id])) av.push('Há uma imagem nesta questão que não pôde ser extraída do PDF (marcada com ⚠ no texto). Confira no arquivo original.');
+      return av;
+    }
+
     function parseQuestionsLocally(rawText) {
       const text = String(rawText || '')
         .replace(/\r/g, '')
         .replace(/--- PÁGINA \d+ ---/g, '\n')
         .replace(/\u00a0/g, ' ')
         .replace(/^[ \t]*[▶►▷]?[ \t]*Assistir\s+(?:a\s+)?(?:resolu[çc][ãa]o\s+)?em\s+v[ií]deo[ \t]*$/gim, '')
-        .replace(/^[ \t]*www\.\S+(?:[ \t]*\|.*)?$/gim, '');
+        .replace(/^[ \t]*www\.\S+(?:[ \t]*\|.*)?$/gim, '')
+        .replace(/\bwww\.[\w.-]+\.[a-z]{2,}(?:\/\S*)?[ \t]*\|?[ \t]*/gi, ' ')
+        .replace(/\(\d{2}\)[ \t]*9?\d{4}[ \t]?-?[ \t]?\d{4}/g, '')
+        .replace(/^[ \t]*\(\d{2}\)?[ \t]*$/gm, '');
 
       let sections = splitIntoSections(text);
       let qSection = sections.find(s => s.items.filter(it => findAltChain(it.body)).length >= Math.ceil(s.items.length / 2));
@@ -597,7 +650,7 @@ const VIDEO_HOST_RE = /youtube\.com|youtu\.be|vimeo\.com|loom\.com|vdocipher|pan
         // Blocos sem alternativas dentro da lista de questões são listas internas do comentário: voltam para a questão anterior
         qSection.items.forEach(it => {
           if (findAltChain(it.body)) {
-            blocks.push({ num: it.num, body: it.body });
+            blocks.push({ num: it.num, body: (it.id ? it.id + '\n' : '') + it.body });
           } else if (blocks.length) {
             blocks[blocks.length - 1].body += '\n' + it.body;
           }
@@ -633,6 +686,7 @@ const VIDEO_HOST_RE = /youtube\.com|youtu\.be|vimeo\.com|loom\.com|vdocipher|pan
           comentario: comment.comentario,
           videoUrl: links.videoUrl,
           allLinks: links.allLinks,
+          avisos: buildAvisos(parsed, comment, correta),
           selected: null,
           answered: false,
           eliminated: []
@@ -643,22 +697,64 @@ const VIDEO_HOST_RE = /youtube\.com|youtu\.be|vimeo\.com|loom\.com|vdocipher|pan
     }
     // @@PARSER_END
 
+async function pageImages(page,vw,pnum){
+  const found=[]; let ops;
+  try{ops=await page.getOperatorList()}catch{return found}
+  const O=pdfjsLib.OPS,st=[]; let ctm=[1,0,0,1,0,0],n=0;
+  const mul=(a,b)=>[a[0]*b[0]+a[2]*b[1],a[1]*b[0]+a[3]*b[1],a[0]*b[2]+a[2]*b[3],a[1]*b[2]+a[3]*b[3],a[0]*b[4]+a[2]*b[5]+a[4],a[1]*b[4]+a[3]*b[5]+a[5]];
+  for(let i=0;i<ops.fnArray.length;i++){
+    const fn=ops.fnArray[i],a=ops.argsArray[i];
+    if(fn===O.save)st.push(ctm);
+    else if(fn===O.restore)ctm=st.pop()||[1,0,0,1,0,0];
+    else if(fn===O.transform)ctm=mul(ctm,a);
+    else if(fn===O.paintImageXObject||fn===O.paintInlineImageXObject){
+      const w=Math.hypot(ctm[0],ctm[1]),h=Math.hypot(ctm[2],ctm[3]);
+      if(w>vw*.9||w<25||h<12)continue; // ignora fundo/marca d'água de página inteira e ícones
+      found.push({id:`p${pnum}i${++n}`,x:ctm[4],y:Math.max(ctm[5],ctm[5]+ctm[3]),ref:a[0],inline:fn===O.paintInlineImageXObject});
+    }
+  }
+  return found;
+}
+async function imageToUrl(page,it){
+  try{
+    const im=it.inline?it.ref:await new Promise((ok,no)=>{const t=setTimeout(()=>no(new Error('timeout')),5000);(String(it.ref).startsWith('g_')?page.commonObjs:page.objs).get(it.ref,o=>{clearTimeout(t);ok(o)})});
+    const w=im.width,h=im.height,sc=Math.min(1,1000/w),c=document.createElement('canvas');
+    c.width=Math.round(w*sc);c.height=Math.round(h*sc);
+    const x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,c.width,c.height);
+    if(im.bitmap)x.drawImage(im.bitmap,0,0,c.width,c.height);
+    else{
+      const t=document.createElement('canvas');t.width=w;t.height=h;const tx=t.getContext('2d'),d=tx.createImageData(w,h),o=d.data,p=im.data;
+      if(p.length===w*h*4)o.set(p);
+      else if(p.length===w*h*3)for(let i=0,j=0;i<p.length;i+=3,j+=4){o[j]=p[i];o[j+1]=p[i+1];o[j+2]=p[i+2];o[j+3]=255}
+      else{const rb=(w+7)>>3;for(let yy=0;yy<h;yy++)for(let xx=0;xx<w;xx++){const v=(p[yy*rb+(xx>>3)]>>(7-(xx&7)))&1?255:0,j=(yy*w+xx)*4;o[j]=o[j+1]=o[j+2]=v;o[j+3]=255}}
+      tx.putImageData(d,0,0);x.drawImage(t,0,0,c.width,c.height);
+    }
+    return c.toDataURL('image/jpeg',.9);
+  }catch(e){console.warn('Imagem não extraída',it.id,e);return null}
+}
 async function processPdf(file){
-  const progress=document.getElementById('progress'); progress.textContent='Lendo PDF...';
+  const progress=document.getElementById('progress'),oldImgs=IMGS; progress.textContent='Lendo PDF...';
   try{
     const buffer=await file.arrayBuffer(),pdf=await pdfjsLib.getDocument({data:buffer}).promise;
-    const pages=[]; let videos=0;
+    const pages=[],newImgs={},allIds=[],failed=[];
+    state.deckName=file.name.replace(/\.pdf$/i,'').replace(/_/g,' ').replace(/^Quest[õo]es\s*-\s*/i,'').trim();
     for(let p=1;p<=pdf.numPages;p++){
       progress.textContent=`Lendo página ${p} de ${pdf.numPages}...`;
-      const page=await pdf.getPage(p), tc=await page.getTextContent(), anns=await page.getAnnotations();
-      let items=tc.items.filter(x=>x.str?.trim()).map(x=>({str:x.str,x:x.transform[4],y:x.transform[5],w:x.width||0}));
+      const page=await pdf.getPage(p),tc=await page.getTextContent(),anns=await page.getAnnotations(),vw=page.view[2]-page.view[0];
+      // descarta texto girado (rodapé/telefone em marca d'água lateral), que se misturava às linhas das questões
+      let items=tc.items.filter(x=>x.str?.trim()&&Math.abs(x.transform[1])<Math.abs(x.transform[0])*.5).map(x=>({str:x.str,x:x.transform[4],y:x.transform[5],w:x.width||0}));
       const links=[],consumed=new Set();
+      for(const it of await pageImages(page,vw,p)){
+        allIds.push(it.id);const url=await imageToUrl(page,it);
+        if(url)newImgs[it.id]=url;else failed.push(it.id);
+        links.push({str:`\n⟦IMG:${it.id}⟧\n`,x:it.x,y:it.y,w:0});
+      }
       for(const a of anns){
         const url=a.url||a.unsafeUrl;if(a.subtype!=='Link'||!url)continue;
         const r=a.rect||[0,0,0,0],under=items.filter(it=>it.x>=r[0]-3&&it.x<=r[2]+3&&it.y>=r[1]-4&&it.y<=r[3]+2);
         const label=under.map(it=>it.str).join(' ');
         const isVideo=VIDEO_HOST_RE.test(url)||!label||/v[ií]deo|assistir|play/i.test(label);
-        if(isVideo){videos++;under.forEach(it=>consumed.add(it))}
+        if(isVideo)under.forEach(it=>consumed.add(it));
         links.push({str:` [${isVideo?'LINK_VIDEO':'LINK'}: ${url}] `,x:r[0],y:under.length?under[0].y:(r[1]+r[3])/2-3,w:0});
       }
       items=items.filter(x=>!consumed.has(x)).concat(links).sort((a,b)=>b.y-a.y);
@@ -666,13 +762,23 @@ async function processPdf(file){
       for(const it of items){const last=lines[lines.length-1];if(last&&Math.abs(last.y-it.y)<=4)last.items.push(it);else lines.push({y:it.y,items:[it]})}
       pages.push(lines.map(line=>{line.items.sort((a,b)=>a.x-b.x);let out='',end=null;for(const it of line.items){if(out&&!out.endsWith(' ')&&!it.str.startsWith(' ')){const gap=end===null?99:it.x-end;if(gap>.5)out+=' '}out+=it.str;end=it.x+it.w}return out.trim()}));
     }
-    const text=pages.flat().filter(Boolean).join('\n');
-    const parsed=parseQuestionsLocally(text);
+    IMGS=newImgs;
+    const parsed=parseQuestionsLocally(pages.flat().filter(Boolean).join('\n'));
     if(!parsed.length)throw new Error('Não foi possível identificar as questões.');
-    state.questions=parsed.map(cleanQuestion);state.current=0;save();document.getElementById('importModal').classList.remove('open');render();
-  }catch(e){progress.textContent='Erro: '+e.message}
+    const used=new Set();
+    parsed.forEach(q=>markerIds([q.enunciado,q.comentario,...q.alternativas.flatMap(a=>[a.texto,a.explicacao])].join(' ')).forEach(i=>used.add(i)));
+    const orphan=allIds.filter(i=>!used.has(i)&&newImgs[i]),pg=ids=>[...new Set(ids.map(i=>i.slice(1).split('i')[0]))].join(', ');
+    const warns=[];
+    if(failed.length)warns.push(`${failed.length} imagem(ns) não puderam ser extraídas (pág. ${pg(failed)}). Elas aparecem marcadas com ⚠ nas questões.`);
+    if(orphan.length)warns.push(`${orphan.length} imagem(ns) não foram encaixadas em nenhuma questão (pág. ${pg(orphan)}). Confira no PDF original.`);
+    const semGab=parsed.filter(q=>!q.correta).length; if(semGab)warns.push(`${semGab} questão(ões) sem gabarito identificado.`);
+    state.questions=parsed.map(cleanQuestion);state.current=0;save();saveImgs();render();
+    const comRes=parsed.filter(q=>q.comentario||q.alternativas.some(a=>a.explicacao)).length;
+    if(warns.length){progress.innerHTML=`<div class="text-slate-700 font-medium">${parsed.length} questões importadas (${comRes} com resolução comentada).</div>`+warns.map(w=>`<div class="mt-2 p-2 rounded bg-amber-50 border border-amber-300 text-amber-900">⚠ ${esc(w)}</div>`).join('')}
+    else{progress.textContent='';document.getElementById('importModal').classList.remove('open')}
+  }catch(e){IMGS=oldImgs;progress.textContent='Erro: '+e.message}
 }
-load();render(); if(window.lucide) lucide.createIcons();
+load();render();loadImgs(); if(window.lucide) lucide.createIcons();
 </script>
 </body>
 </html>
